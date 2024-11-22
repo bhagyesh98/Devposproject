@@ -1,0 +1,100 @@
+pipeline {
+    agent any
+
+    environment {
+        S3_BUCKET = 'netflixbucketartifact'
+        VERSION = '1.2.2'
+        SOURCE_FILE = "target/NETFLIX-${VERSION}.war"
+        AWS_PROFILE = 's3-bucket'
+        REGION = 'ap-south-1'
+    }
+
+    stages {
+        stage('Code') {
+            steps {
+                // Checkout code from GitHub
+                git 'https://github.com/devopsbyraham/jenkins-java-project.git'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                // Compile the project
+                sh 'mvn compile'
+            }
+        }
+
+        stage('Test') {
+            steps {
+                // Run tests
+                sh 'mvn test'
+            }
+        }
+
+        stage('Package') {
+            steps {
+                // Package the WAR file
+                sh 'mvn package'
+            }
+        }
+
+        stage('S3 Upload') {
+            steps {
+                // Upload the WAR file to S3
+                s3Upload(
+                    consoleLogLevel: 'INFO',
+                    dontSetBuildResultOnFailure: false,
+                    dontWaitForConcurrentBuildCompletion: false,
+                    entries: [
+                        [
+                            bucket: S3_BUCKET,
+                            excludedFile: '',
+                            flatten: false,
+                            gzipFiles: false,
+                            keepForever: false,
+                            managedArtifacts: false,
+                            noUploadOnFailure: false,
+                            selectedRegion: REGION,
+                            showDirectlyInBrowser: false,
+                            sourceFile: SOURCE_FILE,
+                            storageClass: 'STANDARD',
+                            uploadFromSlave: false,
+                            useServerSideEncryption: false
+                        ]
+                    ],
+                    pluginFailureResultConstraint: 'FAILURE',
+                    profileName: AWS_PROFILE,
+                    userMetadata: []
+                )
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                // Deploy to dev environment using Ansible
+                ansiblePlaybook(
+                    credentialsId: 'ansible',               // Ansible credentials for SSH access
+                    disableHostKeyChecking: true,            // Disable SSH host key checking
+                    installation: 'ansible',                 // Jenkins tool installation for Ansible
+                    inventory: '/etc/ansible/hosts',         // Path to Ansible inventory
+                    limit: 'dev',                            // Target only 'dev' group in the inventory
+                    playbook: '/etc/ansible/playbook.yml',   // Path to the Ansible playbook
+                    vaultTmpPath: ''                         // If using Ansible Vault, specify the path (empty if not)
+                )
+                echo "Deployment to dev environment completed."
+
+                // Deploy to test environment using Ansible
+                ansiblePlaybook(
+                    credentialsId: 'ansible',               // Ansible credentials for SSH access
+                    disableHostKeyChecking: true,            // Disable SSH host key checking
+                    installation: 'ansible',                 // Jenkins tool installation for Ansible
+                    inventory: '/etc/ansible/hosts',         // Path to Ansible inventory
+                    limit: 'test',                           // Target only 'test' group in the inventory
+                    playbook: '/etc/ansible/playbook.yml',   // Path to the Ansible playbook
+                    vaultTmpPath: ''                         // If using Ansible Vault, specify the path (empty if not)
+                )
+                echo "Deployment to test environment completed."
+            }
+        }
+    }
+}
